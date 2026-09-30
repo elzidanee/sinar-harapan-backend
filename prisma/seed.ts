@@ -1,3 +1,6 @@
+if (typeof process.loadEnvFile === 'function') {
+  process.loadEnvFile();
+}
 import { PrismaPg } from '@prisma/adapter-pg';
 import * as bcrypt from 'bcryptjs';
 import { PrismaClient, UserRole } from '../src/generated/prisma/client.js';
