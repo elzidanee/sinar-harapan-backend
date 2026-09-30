@@ -21,6 +21,7 @@ class EnvironmentVariables {
 
   @IsOptional() @IsString() GOOGLE_CLOUD_PROJECT_ID?: string;
   @IsOptional() @IsString() GOOGLE_APPLICATION_CREDENTIALS_JSON?: string;
+  @IsOptional() @IsString() GOOGLE_VISION_API_KEY?: string;
   @IsOptional() @IsNumber() OCR_TIMEOUT_MS?: number = 3000;
 
   @IsOptional() @IsIn(['fonnte', 'wablas']) WA_PROVIDER?: string = 'fonnte';
