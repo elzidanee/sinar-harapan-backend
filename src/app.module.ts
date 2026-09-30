@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { HealthModule } from './modules/health/health.module.js';
+import { RoomsModule } from './modules/rooms/rooms.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { validateEnv } from './config/env.validation.js';
 
@@ -21,6 +22,7 @@ import { validateEnv } from './config/env.validation.js';
     PrismaModule,
     AuthModule,
     HealthModule,
+    RoomsModule,
   ],
 })
 export class AppModule {}
