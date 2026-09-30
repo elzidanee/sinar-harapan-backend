@@ -8,6 +8,6 @@ export class HealthController {
   @Get()
   async check() {
     await this.prisma.$queryRaw`SELECT 1`;
-    return { status: 'ok', dbConnected: true, timestamp: new Date().toISOString() };
+    return { status: 'ok', dbConnected: true, uptime: process.uptime() };
   }
 }

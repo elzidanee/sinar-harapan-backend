@@ -7,14 +7,20 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
 
-    const status = exception instanceof HttpException
-      ? exception.getStatus()
-      : HttpStatus.INTERNAL_SERVER_ERROR;
+    const status =
+      exception instanceof HttpException
+        ? exception.getStatus()
+        : HttpStatus.INTERNAL_SERVER_ERROR;
 
     const exceptionResponse = exception instanceof HttpException ? exception.getResponse() : null;
-    const message = typeof exceptionResponse === 'string'
-      ? exceptionResponse
-      : (exceptionResponse as any)?.message ?? 'Terjadi kesalahan pada server';
+    const resp =
+      typeof exceptionResponse === 'object' && exceptionResponse !== null
+        ? (exceptionResponse as { code?: unknown; message?: unknown })
+        : null;
+    const message =
+      typeof exceptionResponse === 'string'
+        ? exceptionResponse
+        : (resp?.message ?? 'Terjadi kesalahan pada server');
 
     if (status === HttpStatus.INTERNAL_SERVER_ERROR) {
       console.error('[UNHANDLED_ERROR]', exception);
@@ -23,8 +29,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
     response.status(status).json({
       success: false,
       error: {
-        code: mapStatusToCode(status),
+        code: resp?.code ?? mapStatusToCode(status),
         message: Array.isArray(message) ? message.join(', ') : message,
+        ...(Array.isArray((resp as { message?: unknown })?.message) && {
+          fields: (resp as { message?: unknown[] }).message,
+        }),
       },
     });
   }
@@ -38,6 +47,7 @@ function mapStatusToCode(status: number): string {
     404: 'NOT_FOUND',
     409: 'CONFLICT',
     429: 'RATE_LIMITED',
+    502: 'EXTERNAL_SERVICE_ERROR',
     500: 'INTERNAL_ERROR',
   };
   return map[status] ?? 'INTERNAL_ERROR';
