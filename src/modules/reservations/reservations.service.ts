@@ -372,7 +372,7 @@ export class ReservationsService {
         data: {
           actualCheckOutTime: actualCheckOut,
           additionalCharges: new Prisma.Decimal(additionalChargesTotal),
-          additionalChargesDetail,
+          additionalChargesDetail: additionalChargesDetail as unknown as Prisma.InputJsonValue,
           totalAmount: new Prisma.Decimal(totalAmount),
         },
         include: {
@@ -402,15 +402,20 @@ export class ReservationsService {
     ]);
 
     // Generate PDF invoice & upload ke Storage
-    const safeInvoiceName = updatedReservation.invoiceNumber.replace(/[\/\\]/g, '-');
+    const safeInvoiceName = updatedReservation.invoiceNumber.replace(/[/\\]/g, '-');
     const filePath = `invoices/${safeInvoiceName}.pdf`;
 
     let invoicePdfUrl: string;
     try {
-      const pdfBuffer = await this.invoiceService.generateInvoicePdf(updatedReservation);
+      const pdfBuffer = await this.invoiceService.generateInvoicePdf({
+        ...updatedReservation,
+        room: reservation.room,
+        guest: reservation.guest,
+        additionalChargesDetail,
+      });
       await this.storageService.uploadFile(pdfBuffer, filePath, 'application/pdf');
       invoicePdfUrl = await this.storageService.createSignedUrl(filePath, 3600);
-    } catch (err) {
+    } catch {
       invoicePdfUrl = `https://mock.storage.local/invoices/${safeInvoiceName}.pdf`;
     }
 
@@ -437,7 +442,7 @@ export class ReservationsService {
       throw new NotFoundException('Reservasi tidak ditemukan');
     }
 
-    const safeInvoiceName = reservation.invoiceNumber.replace(/[\/\\]/g, '-');
+    const safeInvoiceName = reservation.invoiceNumber.replace(/[/\\]/g, '-');
     const filePath = `invoices/${safeInvoiceName}.pdf`;
 
     try {

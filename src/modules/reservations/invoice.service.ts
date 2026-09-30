@@ -11,7 +11,7 @@ export interface InvoicePdfData {
   totalNights: number;
   roomRate: number | Prisma.Decimal;
   additionalCharges?: number | Prisma.Decimal;
-  additionalChargesDetail?: Array<{ label: string; amount: number }> | any;
+  additionalChargesDetail?: Prisma.JsonValue | Array<{ label: string; amount: number }>;
   totalAmount: number | Prisma.Decimal;
   paymentMethod: string;
   paymentStatus?: string;
@@ -182,11 +182,20 @@ export class InvoiceService {
   }
 
   async generateInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
+    const additionalCharges: Array<{ label: string; amount: number }> = [];
+    if (Array.isArray(data.additionalChargesDetail)) {
+      for (const item of data.additionalChargesDetail as any[]) {
+        if (item && typeof item === 'object' && 'label' in item && 'amount' in item) {
+          additionalCharges.push({
+            label: String(item.label),
+            amount: Number(item.amount),
+          });
+        }
+      }
+    }
+
     const roomRateNum = Number(data.roomRate);
     const roomTotal = roomRateNum * data.totalNights;
-    const additionalCharges = Array.isArray(data.additionalChargesDetail)
-      ? data.additionalChargesDetail
-      : [];
 
     const doc = React.createElement(
       Document,
