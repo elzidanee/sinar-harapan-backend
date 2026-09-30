@@ -6,6 +6,7 @@ import {
 import { Test, TestingModule } from '@nestjs/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import { StorageService } from '../storage/storage.service.js';
 import { CreateReservationDto } from './dto/create-reservation.dto.js';
 import { InvoiceService } from './invoice.service.js';
 import { ReservationsService } from './reservations.service.js';
@@ -18,10 +19,22 @@ describe('ReservationsService', () => {
       findMany: ReturnType<typeof vi.fn>;
       findUnique: ReturnType<typeof vi.fn>;
       count: ReturnType<typeof vi.fn>;
+      update: ReturnType<typeof vi.fn>;
+    };
+    room: {
+      update: ReturnType<typeof vi.fn>;
+    };
+    activityLog: {
+      create: ReturnType<typeof vi.fn>;
     };
   };
   let invoiceService: {
     generateInvoiceNumber: ReturnType<typeof vi.fn>;
+    generateInvoicePdf: ReturnType<typeof vi.fn>;
+  };
+  let storageService: {
+    uploadFile: ReturnType<typeof vi.fn>;
+    createSignedUrl: ReturnType<typeof vi.fn>;
   };
 
   const sampleDto: CreateReservationDto = {
@@ -48,11 +61,26 @@ describe('ReservationsService', () => {
         findMany: vi.fn(),
         findUnique: vi.fn(),
         count: vi.fn(),
+        update: vi.fn(),
+      },
+      room: {
+        update: vi.fn(),
+      },
+      activityLog: {
+        create: vi.fn(),
       },
     };
 
     invoiceService = {
       generateInvoiceNumber: vi.fn().mockResolvedValue('INV/SH/20260930/0001'),
+      generateInvoicePdf: vi.fn().mockResolvedValue(Buffer.from('%PDF-1.4 dummy')),
+    };
+
+    storageService = {
+      uploadFile: vi.fn().mockResolvedValue('invoices/INV-SH-20260930-0001.pdf'),
+      createSignedUrl: vi
+        .fn()
+        .mockResolvedValue('https://mock.storage.local/invoices/INV-SH-20260930-0001.pdf'),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -60,6 +88,7 @@ describe('ReservationsService', () => {
         ReservationsService,
         { provide: PrismaService, useValue: prisma },
         { provide: InvoiceService, useValue: invoiceService },
+        { provide: StorageService, useValue: storageService },
       ],
     }).compile();
 
@@ -174,7 +203,6 @@ describe('ReservationsService', () => {
       expect(result.items).toHaveLength(1);
       expect(result.pagination.totalItems).toBe(1);
 
-      // Pastikan ada filter checkInTime gte & lte
       const findArgs = prisma.reservation.findMany.mock.calls[0][0];
       expect(findArgs.where.checkInTime.gte).toBeDefined();
       expect(findArgs.where.checkInTime.lte).toBeDefined();
@@ -211,6 +239,117 @@ describe('ReservationsService', () => {
       prisma.reservation.findUnique.mockResolvedValue(null);
 
       await expect(service.findOne('res-not-found')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
+  describe('processCheckout (Tahap 5)', () => {
+    const existingReservation = {
+      id: 'res-uuid-1',
+      invoiceNumber: 'INV/SH/20260930/0001',
+      roomId: 'room-uuid-1',
+      roomRate: 250000,
+      totalNights: 1,
+      expectedCheckOutTime: new Date('2026-10-01T12:00:00.000Z'),
+      actualCheckOutTime: null,
+      room: { roomNumber: '101', roomType: 'Standard' },
+      guest: {
+        fullName: 'Budi Santoso',
+        phoneWhatsapp: '081234567890',
+        idType: 'KTP',
+        idNumber: '3578012345670001',
+      },
+    };
+
+    it('melempar NotFoundException jika reservasi tidak ditemukan', async () => {
+      prisma.reservation.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.processCheckout('unknown-id', {}),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('melempar ConflictException jika reservasi sudah checkout sebelumnya', async () => {
+      prisma.reservation.findUnique.mockResolvedValue({
+        ...existingReservation,
+        actualCheckOutTime: new Date('2026-10-01T12:00:00.000Z'),
+      });
+
+      await expect(
+        service.processCheckout('res-uuid-1', {}),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('berhasil checkout tepat waktu tanpa late fee dan mengubah kamar jadi DIRTY', async () => {
+      prisma.reservation.findUnique.mockResolvedValue(existingReservation);
+
+      const updatedRes = {
+        ...existingReservation,
+        actualCheckOutTime: new Date('2026-10-01T12:00:00.000Z'),
+        additionalCharges: 0,
+        totalAmount: 250000,
+      };
+
+      prisma.$transaction.mockResolvedValue([updatedRes, { status: 'DIRTY' }, {}]);
+
+      const result = await service.processCheckout(
+        'res-uuid-1',
+        { actualCheckOutTime: '2026-10-01T12:00:00.000Z' },
+        'user-rec-1',
+        '127.0.0.1',
+      );
+
+      expect(result.id).toBe('res-uuid-1');
+      expect(result.additionalCharges).toBe(0);
+      expect(result.totalAmount).toBe(250000);
+      expect(result.invoicePdfUrl).toContain('mock.storage.local');
+      expect(storageService.uploadFile).toHaveBeenCalled();
+    });
+
+    it('berhasil menghitung denda late check-out (10% tarif kamar per jam keterlambatan)', async () => {
+      prisma.reservation.findUnique.mockResolvedValue(existingReservation);
+
+      // Keterlambatan 2 jam (expected 12:00, actual 14:00)
+      // Room rate: 250.000 -> 10% = 25.000/jam -> 2 jam = 50.000
+      const actualCheckOutTime = '2026-10-01T14:00:00.000Z';
+      const updatedRes = {
+        ...existingReservation,
+        actualCheckOutTime: new Date(actualCheckOutTime),
+        additionalCharges: 50000,
+        totalAmount: 300000,
+      };
+
+      prisma.$transaction.mockResolvedValue([updatedRes, { status: 'DIRTY' }, {}]);
+
+      const result = await service.processCheckout('res-uuid-1', {
+        actualCheckOutTime,
+        additionalCharges: [{ label: 'Minibar', amount: 20000 }],
+      });
+
+      // Total additional charges: late fee 50.000 + minibar 20.000 = 70.000
+      expect(result.additionalCharges).toBe(70000);
+      expect(result.totalAmount).toBe(320000);
+    });
+  });
+
+  describe('getInvoiceUrl (Tahap 5)', () => {
+    it('mengembalikan URL invoice jika reservasi ditemukan', async () => {
+      prisma.reservation.findUnique.mockResolvedValue({
+        id: 'res-uuid-1',
+        invoiceNumber: 'INV/SH/20260930/0001',
+        room: { roomNumber: '101', roomType: 'Standard' },
+        guest: { fullName: 'Budi Santoso' },
+      });
+
+      const res = await service.getInvoiceUrl('res-uuid-1');
+      expect(res.invoicePdfUrl).toBeDefined();
+    });
+
+    it('melempar NotFoundException jika reservasi tidak ditemukan', async () => {
+      prisma.reservation.findUnique.mockResolvedValue(null);
+
+      await expect(service.getInvoiceUrl('unknown-id')).rejects.toThrow(
         NotFoundException,
       );
     });

@@ -20,6 +20,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
+import { CheckoutDto } from './dto/checkout.dto.js';
 import { CreateReservationDto } from './dto/create-reservation.dto.js';
 import { QueryReservationsDto } from './dto/query-reservations.dto.js';
 import { ReservationsService } from './reservations.service.js';
@@ -73,5 +74,30 @@ export class ReservationsController {
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.reservationsService.findOne(id);
+  }
+
+  @ApiOperation({ summary: 'Proses check-out dan generate final PDF invoice' })
+  @ApiResponse({ status: 200, description: 'Check-out berhasil, invoice diterbitkan' })
+  @ApiResponse({ status: 404, description: 'Reservasi tidak ditemukan' })
+  @ApiResponse({ status: 409, description: 'Reservasi sudah check-out sebelumnya' })
+  @Roles('RECEPTIONIST', 'MANAGER')
+  @Post(':id/checkout')
+  @HttpCode(HttpStatus.OK)
+  checkout(
+    @Param('id') id: string,
+    @Body() dto: CheckoutDto,
+    @CurrentUser() user: { id: string; role: string },
+    @Ip() ip: string,
+  ) {
+    return this.reservationsService.processCheckout(id, dto, user?.id, ip);
+  }
+
+  @ApiOperation({ summary: 'Ambil URL PDF invoice reservasi untuk cetak ulang' })
+  @ApiResponse({ status: 200, description: 'URL PDF invoice berhasil didapatkan' })
+  @ApiResponse({ status: 404, description: 'Reservasi tidak ditemukan' })
+  @Roles('RECEPTIONIST', 'MANAGER')
+  @Get(':id/invoice')
+  getInvoice(@Param('id') id: string) {
+    return this.reservationsService.getInvoiceUrl(id);
   }
 }

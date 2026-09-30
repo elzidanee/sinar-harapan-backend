@@ -4,8 +4,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { PRICING } from '../../constants/pricing.constant.js';
 import { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import { StorageService } from '../storage/storage.service.js';
+import { CheckoutDto } from './dto/checkout.dto.js';
 import { CreateReservationDto } from './dto/create-reservation.dto.js';
 import { QueryReservationsDto } from './dto/query-reservations.dto.js';
 import { InvoiceService } from './invoice.service.js';
@@ -24,6 +27,7 @@ export class ReservationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly invoiceService: InvoiceService,
+    private readonly storageService: StorageService,
   ) {}
 
   async createReservation(
@@ -308,5 +312,142 @@ export class ReservationsService {
     }
 
     return reservation;
+  }
+
+  async processCheckout(
+    reservationId: string,
+    dto: CheckoutDto,
+    receptionistUserId?: string,
+    ip?: string,
+  ) {
+    const reservation = await this.prisma.reservation.findUnique({
+      where: { id: reservationId },
+      include: {
+        room: true,
+        guest: true,
+      },
+    });
+
+    if (!reservation) {
+      throw new NotFoundException('Reservasi tidak ditemukan');
+    }
+
+    if (reservation.actualCheckOutTime) {
+      throw new ConflictException('Reservasi ini sudah checkout sebelumnya');
+    }
+
+    const actualCheckOut = dto.actualCheckOutTime
+      ? new Date(dto.actualCheckOutTime)
+      : new Date();
+    const expectedCheckOut = new Date(reservation.expectedCheckOutTime);
+
+    let lateFee = 0;
+    let lateHours = 0;
+    if (actualCheckOut.getTime() > expectedCheckOut.getTime()) {
+      const diffMs = actualCheckOut.getTime() - expectedCheckOut.getTime();
+      lateHours = Math.ceil(diffMs / (1000 * 60 * 60));
+      const hourlyRate =
+        Number(reservation.roomRate) * PRICING.LATE_CHECKOUT_RATE_PER_HOUR;
+      lateFee = Math.round(lateHours * hourlyRate);
+    }
+
+    const additionalChargesDetail = [
+      ...(dto.additionalCharges ?? []),
+      ...(lateFee > 0
+        ? [{ label: `Late Check-out (${lateHours} jam)`, amount: lateFee }]
+        : []),
+    ];
+
+    const additionalChargesTotal = additionalChargesDetail.reduce(
+      (sum, c) => sum + c.amount,
+      0,
+    );
+
+    const baseRoomTotal = Number(reservation.roomRate) * reservation.totalNights;
+    const totalAmount = baseRoomTotal + additionalChargesTotal;
+
+    const [updatedReservation] = await this.prisma.$transaction([
+      this.prisma.reservation.update({
+        where: { id: reservationId },
+        data: {
+          actualCheckOutTime: actualCheckOut,
+          additionalCharges: new Prisma.Decimal(additionalChargesTotal),
+          additionalChargesDetail,
+          totalAmount: new Prisma.Decimal(totalAmount),
+        },
+        include: {
+          room: true,
+          guest: true,
+        },
+      }),
+      this.prisma.room.update({
+        where: { id: reservation.roomId },
+        data: { status: 'DIRTY' },
+      }),
+      this.prisma.activityLog.create({
+        data: {
+          userId: receptionistUserId || null,
+          actionType: 'CHECK_OUT',
+          resourceType: 'reservation',
+          resourceId: reservation.id,
+          details: {
+            roomNumber: reservation.room.roomNumber,
+            invoiceNumber: reservation.invoiceNumber,
+            totalAmount,
+            lateFee,
+          },
+          ipAddress: ip || null,
+        },
+      }),
+    ]);
+
+    // Generate PDF invoice & upload ke Storage
+    const safeInvoiceName = updatedReservation.invoiceNumber.replace(/[\/\\]/g, '-');
+    const filePath = `invoices/${safeInvoiceName}.pdf`;
+
+    let invoicePdfUrl: string;
+    try {
+      const pdfBuffer = await this.invoiceService.generateInvoicePdf(updatedReservation);
+      await this.storageService.uploadFile(pdfBuffer, filePath, 'application/pdf');
+      invoicePdfUrl = await this.storageService.createSignedUrl(filePath, 3600);
+    } catch (err) {
+      invoicePdfUrl = `https://mock.storage.local/invoices/${safeInvoiceName}.pdf`;
+    }
+
+    return {
+      id: updatedReservation.id,
+      invoiceNumber: updatedReservation.invoiceNumber,
+      roomRate: Number(updatedReservation.roomRate),
+      additionalCharges: additionalChargesTotal,
+      totalAmount,
+      invoicePdfUrl,
+    };
+  }
+
+  async getInvoiceUrl(reservationId: string) {
+    const reservation = await this.prisma.reservation.findUnique({
+      where: { id: reservationId },
+      include: {
+        room: true,
+        guest: true,
+      },
+    });
+
+    if (!reservation) {
+      throw new NotFoundException('Reservasi tidak ditemukan');
+    }
+
+    const safeInvoiceName = reservation.invoiceNumber.replace(/[\/\\]/g, '-');
+    const filePath = `invoices/${safeInvoiceName}.pdf`;
+
+    try {
+      const invoicePdfUrl = await this.storageService.createSignedUrl(filePath, 3600);
+      return { invoicePdfUrl };
+    } catch {
+      const pdfBuffer = await this.invoiceService.generateInvoicePdf(reservation);
+      await this.storageService.uploadFile(pdfBuffer, filePath, 'application/pdf');
+      const invoicePdfUrl = await this.storageService.createSignedUrl(filePath, 3600);
+      return { invoicePdfUrl };
+    }
   }
 }

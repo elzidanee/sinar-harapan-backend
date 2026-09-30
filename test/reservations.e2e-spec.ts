@@ -383,4 +383,78 @@ describe('Reservations & Check-in (Tahap 4 e2e)', () => {
       expect(res.body.error.code).toBe('NOT_FOUND');
     });
   });
+
+  describe('Check-out & Invoice (Tahap 5 e2e)', () => {
+    it('POST /api/reservations/:id/checkout berhasil memproses check-out dan menerbitkan PDF invoice', async () => {
+      const resDetail = await prisma.reservation.findUniqueOrThrow({
+        where: { id: createdReservationId },
+      });
+
+      const res = await request(app.getHttpServer())
+        .post(`/api/reservations/${createdReservationId}/checkout`)
+        .set('Authorization', `Bearer ${receptionistToken}`)
+        .send({
+          additionalCharges: [
+            { label: 'Laundry', amount: 35000 },
+          ],
+          // Check-out tepat waktu persis pada expectedCheckOutTime
+          actualCheckOutTime: resDetail.expectedCheckOutTime.toISOString(),
+        })
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.id).toBe(createdReservationId);
+      expect(res.body.data.roomRate).toBe(250000);
+      expect(res.body.data.additionalCharges).toBe(35000);
+      expect(res.body.data.totalAmount).toBe(285000);
+      expect(res.body.data.invoicePdfUrl).toBeDefined();
+
+      // Verifikasi status kamar berubah menjadi DIRTY
+      const room = await prisma.room.findUnique({ where: { id: room1Id } });
+      expect(room?.status).toBe('DIRTY');
+
+      // Verifikasi activity log tercatat CHECK_OUT
+      const log = await prisma.activityLog.findFirst({
+        where: {
+          actionType: 'CHECK_OUT',
+          resourceId: createdReservationId,
+        },
+      });
+      expect(log).toBeDefined();
+    });
+
+    it('POST /api/reservations/:id/checkout menolak jika sudah checkout sebelumnya → 409 CONFLICT', async () => {
+      const res = await request(app.getHttpServer())
+        .post(`/api/reservations/${createdReservationId}/checkout`)
+        .set('Authorization', `Bearer ${receptionistToken}`)
+        .send({})
+        .expect(409);
+
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('CONFLICT');
+    });
+
+    it('GET /api/reservations/:id/invoice mengembalikan URL invoice yang valid', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/reservations/${createdReservationId}/invoice`)
+        .set('Authorization', `Bearer ${receptionistToken}`)
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.invoicePdfUrl).toBeDefined();
+    });
+
+    it('PATCH /api/rooms/:id/mark-clean membersihkan kamar DIRTY menjadi AVAILABLE', async () => {
+      const res = await request(app.getHttpServer())
+        .patch(`/api/rooms/${room1Id}/mark-clean`)
+        .set('Authorization', `Bearer ${receptionistToken}`)
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.status).toBe('AVAILABLE');
+
+      const room = await prisma.room.findUnique({ where: { id: room1Id } });
+      expect(room?.status).toBe('AVAILABLE');
+    });
+  });
 });
