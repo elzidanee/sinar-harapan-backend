@@ -6,3 +6,4 @@ allowBuilds:
   '@scarf/scarf': true
   esbuild: true
   prisma: false
+  'tesseract.js': false

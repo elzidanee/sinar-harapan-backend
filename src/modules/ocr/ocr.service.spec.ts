@@ -176,9 +176,29 @@ describe('OcrService', () => {
       expect(storageService.createSignedUrl).toHaveBeenCalled();
     });
 
-    it('melempar ExternalServiceException jika Google Vision error atau timeout', async () => {
+    it('berhasil fallback ke OCR lokal Tesseract jika Google Vision error', async () => {
+      httpService.post.mockReturnValue(
+        throwError(() => new Error('Google Vision 403 Billing')),
+      );
+      vi.spyOn(service, 'callLocalTesseract').mockResolvedValue(
+        'NIK : 3578012345670001\nNama : BUDI SANTOSO\nAlamat : JL. MERDEKA NO. 10',
+      );
+
+      const buffer = Buffer.from('dummy-image');
+      const result = await service.extractIdentity(buffer, 'ktp.jpg', 'image/jpeg', 'KTP');
+
+      expect(result.idType).toBe('KTP');
+      expect(result.idNumber).toBe('3578012345670001');
+      expect(result.namaLengkap).toBe('BUDI SANTOSO');
+      expect(service.callLocalTesseract).toHaveBeenCalled();
+    });
+
+    it('melempar ExternalServiceException jika Google Vision dan Tesseract keduanya gagal', async () => {
       httpService.post.mockReturnValue(
         throwError(() => new Error('Google Vision Timeout')),
+      );
+      vi.spyOn(service, 'callLocalTesseract').mockRejectedValue(
+        new Error('Tesseract failed to read image'),
       );
 
       const buffer = Buffer.from('dummy-image');

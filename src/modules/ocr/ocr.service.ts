@@ -10,6 +10,7 @@ import { catchError, timeout } from 'rxjs/operators';
 import { ExternalServiceException } from '../../common/errors/app.exception.js';
 import { StorageService } from '../storage/storage.service.js';
 import { DocumentType } from './dto/extract-identity.dto.js';
+import { createWorker } from 'tesseract.js';
 
 interface GoogleVisionResponse {
   responses?: Array<{
@@ -70,8 +71,23 @@ export class OcrService {
       tempImageUrl = null;
     }
 
-    // 2. Kirim gambar ke Google Cloud Vision API
-    const rawText = await this.callGoogleVision(imageBuffer);
+    // 2. Ekstraksi teks dari gambar: Coba Google Vision terlebih dahulu, jika gagal otomatis fallback ke Tesseract.js
+    let rawText = '';
+    try {
+      rawText = await this.callGoogleVision(imageBuffer);
+    } catch (visionError) {
+      this.logger.warn(
+        `Google Vision tidak tersedia (${(visionError as Error)?.message}). Menggunakan OCR lokal Tesseract.js...`,
+      );
+      try {
+        rawText = await this.callLocalTesseract(imageBuffer);
+      } catch (tesseractError) {
+        this.logger.error('OCR lokal (Tesseract) juga gagal:', tesseractError);
+        throw new ExternalServiceException(
+          'Layanan OCR tidak merespons, gunakan input manual',
+        );
+      }
+    }
 
     // 3. Dispatch parser berdasarkan jenis dokumen (KTP/SIM/Paspor)
     let parsedResult;
@@ -163,6 +179,20 @@ export class OcrService {
       throw new ExternalServiceException(
         'Layanan OCR tidak merespons, gunakan input manual',
       );
+    }
+  }
+
+  /**
+   * Ekstraksi teks menggunakan engine OCR lokal Tesseract.js (bebas biaya & offline)
+   */
+  async callLocalTesseract(imageBuffer: Buffer): Promise<string> {
+    this.logger.log('Memproses OCR menggunakan engine lokal Tesseract.js...');
+    const worker = await createWorker(['eng', 'ind']);
+    try {
+      const result = await worker.recognize(imageBuffer);
+      return result.data.text ?? '';
+    } finally {
+      await worker.terminate();
     }
   }
 
