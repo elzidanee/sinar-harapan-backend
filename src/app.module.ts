@@ -1,8 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { HealthModule } from './modules/health/health.module.js';
+import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { OcrModule } from './modules/ocr/ocr.module.js';
 import { ReservationsModule } from './modules/reservations/reservations.module.js';
 import { RoomsModule } from './modules/rooms/rooms.module.js';
@@ -13,6 +15,7 @@ import { validateEnv } from './config/env.validation.js';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
+    ScheduleModule.forRoot(),
     ThrottlerModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => [
@@ -29,6 +32,7 @@ import { validateEnv } from './config/env.validation.js';
     StorageModule,
     OcrModule,
     ReservationsModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}

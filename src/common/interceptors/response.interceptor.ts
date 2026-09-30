@@ -7,6 +7,10 @@ export class ResponseInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     return next.handle().pipe(
       map((data: unknown) => {
+        if (Buffer.isBuffer(data)) {
+          return data;
+        }
+
         if (
           data &&
           typeof data === 'object' &&
