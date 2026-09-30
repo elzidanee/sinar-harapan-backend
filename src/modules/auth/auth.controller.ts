@@ -7,7 +7,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Throttle } from '@nestjs/throttler';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
 import { AuthService } from './auth.service.js';
@@ -20,6 +20,7 @@ export class AuthController {
 
   // Rate limit login: 5 percobaan/menit per IP — lihat backend.md Tahap 8 & security.md §4.3
   @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @UseGuards(ThrottlerGuard)
   @Post('login')
   @HttpCode(HttpStatus.OK)
   login(@Body() dto: LoginDto) {
