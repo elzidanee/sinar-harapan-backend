@@ -2,10 +2,12 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
+import { AuditLogsModule } from './modules/audit-logs/audit-logs.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { OcrModule } from './modules/ocr/ocr.module.js';
+import { ReportsModule } from './modules/reports/reports.module.js';
 import { ReservationsModule } from './modules/reservations/reservations.module.js';
 import { RoomsModule } from './modules/rooms/rooms.module.js';
 import { StorageModule } from './modules/storage/storage.module.js';
@@ -33,6 +35,8 @@ import { validateEnv } from './config/env.validation.js';
     OcrModule,
     ReservationsModule,
     NotificationsModule,
+    AuditLogsModule,
+    ReportsModule,
   ],
 })
 export class AppModule {}
