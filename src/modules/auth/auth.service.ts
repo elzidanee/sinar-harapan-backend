@@ -58,21 +58,43 @@ export class AuthService {
     return amount * multiplier;
   }
 
-  async login(dto: LoginDto) {
+  async login(dto: LoginDto, ipAddress?: string) {
     const user = await this.prisma.user.findUnique({
       where: { username: dto.username },
     });
 
     if (!user || !user.isActive) {
+      await this.recordFailedLogin(null, dto.username, ipAddress);
       throw new UnauthorizedException('Kredensial tidak valid');
     }
 
     const matched = await bcrypt.compare(dto.password, user.passwordHash);
     if (!matched) {
+      await this.recordFailedLogin(user.id, dto.username, ipAddress);
       throw new UnauthorizedException('Kredensial tidak valid');
     }
 
     return this.signToken(user);
+  }
+
+  private async recordFailedLogin(
+    userId: string | null,
+    username: string,
+    ipAddress?: string,
+  ) {
+    try {
+      await this.prisma.activityLog.create({
+        data: {
+          userId: userId ?? undefined,
+          actionType: 'LOGIN_FAILED',
+          resourceType: 'AUTH',
+          details: { username },
+          ipAddress,
+        },
+      });
+    } catch (err) {
+      console.error('[LOGIN_FAILED_LOG_ERROR]', err);
+    }
   }
 
   async refresh(userId: string) {
