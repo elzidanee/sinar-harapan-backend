@@ -1,0 +1,218 @@
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
+import { Test, TestingModule } from '@nestjs/testing';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { PrismaService } from '../../prisma/prisma.service.js';
+import { CreateReservationDto } from './dto/create-reservation.dto.js';
+import { InvoiceService } from './invoice.service.js';
+import { ReservationsService } from './reservations.service.js';
+
+describe('ReservationsService', () => {
+  let service: ReservationsService;
+  let prisma: {
+    $transaction: ReturnType<typeof vi.fn>;
+    reservation: {
+      findMany: ReturnType<typeof vi.fn>;
+      findUnique: ReturnType<typeof vi.fn>;
+      count: ReturnType<typeof vi.fn>;
+    };
+  };
+  let invoiceService: {
+    generateInvoiceNumber: ReturnType<typeof vi.fn>;
+  };
+
+  const sampleDto: CreateReservationDto = {
+    roomId: 'room-uuid-1',
+    bookingSource: 'WALK_IN',
+    guest: {
+      idType: 'KTP',
+      idNumber: '3578012345670001',
+      fullName: 'Budi Santoso',
+      phoneWhatsapp: '081234567890',
+      address: 'Jl. Merdeka No. 10, Malang',
+    },
+    checkInTime: '2026-09-30T14:00:00.000Z',
+    expectedCheckOutTime: '2026-10-01T12:00:00.000Z',
+    totalNights: 1,
+    roomRate: 250000,
+    paymentMethod: 'CASH',
+  };
+
+  beforeEach(async () => {
+    prisma = {
+      $transaction: vi.fn(),
+      reservation: {
+        findMany: vi.fn(),
+        findUnique: vi.fn(),
+        count: vi.fn(),
+      },
+    };
+
+    invoiceService = {
+      generateInvoiceNumber: vi.fn().mockResolvedValue('INV/SH/20260930/0001'),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ReservationsService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: InvoiceService, useValue: invoiceService },
+      ],
+    }).compile();
+
+    service = module.get<ReservationsService>(ReservationsService);
+  });
+
+  describe('createReservation', () => {
+    it('menolak booking REDDOORZ tanpa reddoorzBookingCode → 400 BadRequestException', async () => {
+      const reddoorzDto: CreateReservationDto = Object.assign({}, sampleDto, {
+        bookingSource: 'REDDOORZ' as const,
+        reddoorzBookingCode: undefined,
+      });
+
+      await expect(
+        service.createReservation(reddoorzDto, 'user-1'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('menolak check-in jika kamar tidak berstatus AVAILABLE → 409 ConflictException', async () => {
+      const mockTx = {
+        $queryRaw: vi.fn().mockResolvedValue([{ id: 'room-uuid-1', status: 'OCCUPIED' }]),
+      };
+      prisma.$transaction.mockImplementation(async (cb: (tx: any) => any) => cb(mockTx));
+
+      await expect(
+        service.createReservation(sampleDto, 'user-1'),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('menolak check-in jika nomor identitas tamu sedang aktif di kamar lain → 409 ConflictException', async () => {
+      const mockTx = {
+        $queryRaw: vi.fn().mockResolvedValue([
+          { id: 'room-uuid-1', status: 'AVAILABLE', roomNumber: '101' },
+        ]),
+        reservation: {
+          findFirst: vi.fn().mockResolvedValue({ id: 'active-res-id' }),
+        },
+      };
+      prisma.$transaction.mockImplementation(async (cb: (tx: any) => any) => cb(mockTx));
+
+      await expect(
+        service.createReservation(sampleDto, 'user-1'),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('berhasil membuat reservasi dan check-in ketika data valid dan kamar tersedia', async () => {
+      const mockGuest = {
+        id: 'guest-uuid-1',
+        fullName: 'Budi Santoso',
+        idType: 'KTP',
+        idNumber: '3578012345670001',
+        phoneWhatsapp: '081234567890',
+      };
+      const mockReservation = {
+        id: 'res-uuid-1',
+        invoiceNumber: 'INV/SH/20260930/0001',
+        roomId: 'room-uuid-1',
+        totalAmount: 250000,
+        checkInTime: new Date(sampleDto.checkInTime),
+        expectedCheckOutTime: new Date(sampleDto.expectedCheckOutTime),
+        room: { roomNumber: '101', roomType: 'Standard' },
+        guest: mockGuest,
+      };
+
+      const mockTx = {
+        $queryRaw: vi.fn().mockResolvedValue([
+          { id: 'room-uuid-1', status: 'AVAILABLE', room_number: '101' },
+        ]),
+        reservation: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          create: vi.fn().mockResolvedValue(mockReservation),
+        },
+        guest: {
+          upsert: vi.fn().mockResolvedValue(mockGuest),
+        },
+        room: {
+          update: vi.fn().mockResolvedValue({ id: 'room-uuid-1', status: 'OCCUPIED' }),
+        },
+        activityLog: {
+          create: vi.fn().mockResolvedValue({ id: 'log-1' }),
+        },
+      };
+
+      prisma.$transaction.mockImplementation(async (cb: (tx: any) => any) => cb(mockTx));
+
+      const result = await service.createReservation(sampleDto, 'user-1', '127.0.0.1');
+
+      expect(result.id).toBe('res-uuid-1');
+      expect(result.invoiceNumber).toBe('INV/SH/20260930/0001');
+      expect(result.status).toBe('OCCUPIED');
+      expect(result.totalAmount).toBe(250000);
+      expect(mockTx.room.update).toHaveBeenCalledWith({
+        where: { id: 'room-uuid-1' },
+        data: { status: 'OCCUPIED' },
+      });
+      expect(mockTx.activityLog.create).toHaveBeenCalled();
+    });
+  });
+
+  describe('findAll', () => {
+    it('memaksa filter tanggal hari ini untuk role RECEPTIONIST', async () => {
+      prisma.reservation.count.mockResolvedValue(1);
+      prisma.reservation.findMany.mockResolvedValue([
+        { id: 'res-1', invoiceNumber: 'INV/1' },
+      ]);
+
+      const result = await service.findAll(
+        { page: 1, limit: 10 },
+        { id: 'rec-1', role: 'RECEPTIONIST' },
+      );
+
+      expect(result.items).toHaveLength(1);
+      expect(result.pagination.totalItems).toBe(1);
+
+      // Pastikan ada filter checkInTime gte & lte
+      const findArgs = prisma.reservation.findMany.mock.calls[0][0];
+      expect(findArgs.where.checkInTime.gte).toBeDefined();
+      expect(findArgs.where.checkInTime.lte).toBeDefined();
+    });
+
+    it('mendukung custom date filter untuk role MANAGER', async () => {
+      prisma.reservation.count.mockResolvedValue(5);
+      prisma.reservation.findMany.mockResolvedValue([]);
+
+      const result = await service.findAll(
+        { startDate: '2026-09-01', endDate: '2026-09-30' },
+        { id: 'mgr-1', role: 'MANAGER' },
+      );
+
+      expect(result.pagination.totalItems).toBe(5);
+      const findArgs = prisma.reservation.findMany.mock.calls[0][0];
+      expect(findArgs.where.checkInTime.gte).toEqual(new Date('2026-09-01'));
+      expect(findArgs.where.checkInTime.lte).toBeDefined();
+    });
+  });
+
+  describe('findOne', () => {
+    it('mengembalikan reservasi jika ditemukan', async () => {
+      prisma.reservation.findUnique.mockResolvedValue({
+        id: 'res-1',
+        invoiceNumber: 'INV/1',
+      });
+
+      const result = await service.findOne('res-1');
+      expect(result.id).toBe('res-1');
+    });
+
+    it('melempar NotFoundException jika reservasi tidak ditemukan', async () => {
+      prisma.reservation.findUnique.mockResolvedValue(null);
+
+      await expect(service.findOne('res-not-found')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+});

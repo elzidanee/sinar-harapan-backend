@@ -6,11 +6,28 @@ import { map } from 'rxjs/operators';
 export class ResponseInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     return next.handle().pipe(
-      map((data) => ({
-        success: true,
-        data,
-        meta: { timestamp: new Date().toISOString() },
-      })),
+      map((data: unknown) => {
+        if (
+          data &&
+          typeof data === 'object' &&
+          'items' in data &&
+          'pagination' in data
+        ) {
+          const { items, pagination } = data as { items: unknown; pagination: unknown };
+          return {
+            success: true,
+            data: items,
+            pagination,
+            meta: { timestamp: new Date().toISOString() },
+          };
+        }
+
+        return {
+          success: true,
+          data,
+          meta: { timestamp: new Date().toISOString() },
+        };
+      }),
     );
   }
 }

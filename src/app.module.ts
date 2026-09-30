@@ -4,6 +4,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { OcrModule } from './modules/ocr/ocr.module.js';
+import { ReservationsModule } from './modules/reservations/reservations.module.js';
 import { RoomsModule } from './modules/rooms/rooms.module.js';
 import { StorageModule } from './modules/storage/storage.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
@@ -27,6 +28,7 @@ import { validateEnv } from './config/env.validation.js';
     RoomsModule,
     StorageModule,
     OcrModule,
+    ReservationsModule,
   ],
 })
 export class AppModule {}
