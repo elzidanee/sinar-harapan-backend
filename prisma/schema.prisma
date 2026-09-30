@@ -1,0 +1,157 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  RECEPTIONIST
+  MANAGER
+}
+
+enum RoomStatus {
+  AVAILABLE
+  OCCUPIED
+  DIRTY
+  MAINTENANCE
+}
+
+enum BookingSource {
+  REDDOORZ
+  WALK_IN
+}
+
+enum PaymentStatus {
+  PAID
+  PENDING
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  QRIS
+  TRANSFER
+  REDDOORZ_PREPAID
+}
+
+enum WaDeliveryStatus {
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum IdentityType {
+  KTP
+  PASSPORT
+  SIM
+  OTHER
+}
+
+model User {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  passwordHash String   @map("password_hash")
+  fullName     String   @map("full_name")
+  role         UserRole
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  reservations Reservation[] @relation("ReceptionistReservations")
+  activityLogs ActivityLog[]
+
+  @@map("users")
+}
+
+model Room {
+  id                 String     @id @default(uuid())
+  roomNumber         String     @unique @map("room_number")
+  roomType           String     @map("room_type")
+  floor              Int
+  basePricePerNight  Decimal    @map("base_price_per_night") @db.Decimal(12, 2)
+  facilities         Json       @default("[]")
+  status             RoomStatus @default(AVAILABLE)
+  updatedAt          DateTime   @updatedAt @map("updated_at")
+  createdAt          DateTime   @default(now()) @map("created_at")
+
+  reservations Reservation[]
+
+  @@index([status])
+  @@index([roomType, floor])
+  @@map("rooms")
+}
+
+model Guest {
+  id             String       @id @default(uuid())
+  idType         IdentityType @map("id_type")
+  idNumber       String       @map("id_number")
+  fullName       String       @map("full_name")
+  address        String?
+  nationality    String?
+  phoneWhatsapp  String       @map("phone_whatsapp")
+  idImageUrl     String?      @map("id_image_url")
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  reservations Reservation[]
+
+  @@unique([idType, idNumber])
+  @@index([idType, idNumber])
+  @@index([phoneWhatsapp])
+  @@map("guests")
+}
+
+model Reservation {
+  id                        String            @id @default(uuid())
+  invoiceNumber              String            @unique @map("invoice_number")
+  guestId                    String            @map("guest_id")
+  guest                      Guest             @relation(fields: [guestId], references: [id])
+  roomId                     String            @map("room_id")
+  room                       Room              @relation(fields: [roomId], references: [id])
+  bookingSource              BookingSource     @map("booking_source")
+  reddoorzBookingCode        String?           @map("reddoorz_booking_code")
+  checkInTime                DateTime          @map("check_in_time")
+  expectedCheckOutTime       DateTime          @map("expected_check_out_time")
+  actualCheckOutTime         DateTime?         @map("actual_check_out_time")
+  totalNights                Int               @map("total_nights")
+  roomRate                   Decimal           @map("room_rate") @db.Decimal(12, 2)
+  additionalCharges          Decimal           @default(0) @map("additional_charges") @db.Decimal(12, 2)
+  additionalChargesDetail    Json              @default("[]") @map("additional_charges_detail")
+  totalAmount                Decimal           @map("total_amount") @db.Decimal(12, 2)
+  paymentMethod              PaymentMethod     @map("payment_method")
+  paymentStatus              PaymentStatus     @default(PAID) @map("payment_status")
+  receptionistUserId         String?           @map("receptionist_user_id")
+  receptionist                User?             @relation("ReceptionistReservations", fields: [receptionistUserId], references: [id])
+  waReminderSentAt            DateTime?         @map("wa_reminder_sent_at")
+  waDeliveryStatus             WaDeliveryStatus? @map("wa_delivery_status")
+  createdAt                   DateTime          @default(now()) @map("created_at")
+  updatedAt                   DateTime          @updatedAt @map("updated_at")
+
+  @@index([roomId])
+  @@index([guestId])
+  @@index([checkInTime])
+  @@index([expectedCheckOutTime])
+  @@index([invoiceNumber])
+  @@map("reservations")
+}
+
+model ActivityLog {
+  id           String   @id @default(uuid())
+  userId       String?  @map("user_id")
+  user         User?    @relation(fields: [userId], references: [id])
+  actionType   String   @map("action_type")
+  resourceType String?  @map("resource_type")
+  resourceId   String?  @map("resource_id")
+  details      Json?
+  ipAddress    String?  @map("ip_address")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([actionType])
+  @@index([createdAt])
+  @@map("activity_logs")
+}
