@@ -1,5 +1,7 @@
-if (typeof process.loadEnvFile === 'function') {
-  process.loadEnvFile();
+try {
+  process.loadEnvFile?.();
+} catch {
+  // Abaikan jika .env tidak ada (mis. di environment Railway / production)
 }
 import { PrismaPg } from '@prisma/adapter-pg';
 import * as bcrypt from 'bcryptjs';
