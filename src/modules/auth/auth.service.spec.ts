@@ -60,7 +60,7 @@ describe('AuthService', () => {
 
     expect(result.token).toBe('mock-jwt-token');
     expect(result.expiresIn).toBe(43200);
-    expect(result.user.username ?? result.user.fullName).toBe('Resepsionis Satu');
+    expect(result.user.fullName).toBe('Resepsionis Satu');
     expect(result.user.role).toBe('RECEPTIONIST');
     expect(jwtService.sign).toHaveBeenCalled();
   });
