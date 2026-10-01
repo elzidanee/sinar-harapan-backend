@@ -165,7 +165,8 @@ describe('OcrService', () => {
         }),
       );
 
-      const buffer = Buffer.from('dummy-image');
+      // Gunakan buffer dengan JPEG magic bytes valid (FF D8 FF) — security.md §10 validasi magic bytes
+      const buffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0, ...new Array(50).fill(0x00)]);
       const result = await service.extractIdentity(buffer, 'ktp.jpg', 'image/jpeg', 'KTP');
 
       expect(result.idType).toBe('KTP');
@@ -184,7 +185,8 @@ describe('OcrService', () => {
         'NIK : 3578012345670001\nNama : BUDI SANTOSO\nAlamat : JL. MERDEKA NO. 10',
       );
 
-      const buffer = Buffer.from('dummy-image');
+      // Buffer dengan JPEG magic bytes valid
+      const buffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0, ...new Array(50).fill(0x00)]);
       const result = await service.extractIdentity(buffer, 'ktp.jpg', 'image/jpeg', 'KTP');
 
       expect(result.idType).toBe('KTP');
@@ -201,10 +203,86 @@ describe('OcrService', () => {
         new Error('Tesseract failed to read image'),
       );
 
-      const buffer = Buffer.from('dummy-image');
+      // Buffer dengan JPEG magic bytes valid agar lolos magic bytes check
+      const buffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0, ...new Array(50).fill(0x00)]);
       await expect(
         service.extractIdentity(buffer, 'ktp.jpg', 'image/jpeg', 'KTP'),
       ).rejects.toThrow(ExternalServiceException);
+    });
+  });
+
+  // =====================================================================
+  // security.md §10 — Magic Bytes Validation (File Type Spoofing Prevention)
+  // =====================================================================
+  describe('extractIdentity — validasi magic bytes (security.md §10)', () => {
+    it('menolak file dengan MIME type tidak didukung → BadRequestException', async () => {
+      const buffer = Buffer.alloc(20, 0x00);
+      await expect(
+        service.extractIdentity(buffer, 'test.gif', 'image/gif', 'KTP'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('menolak file yang mengklaim image/jpeg tapi bukan JPEG (magic bytes palsu)', async () => {
+      // Attacker kirim Content-Type: image/jpeg tapi isi file adalah EXE (MZ header)
+      const fakeBuffer = Buffer.from([0x4d, 0x5a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+      await expect(
+        service.extractIdentity(fakeBuffer, 'malicious.exe', 'image/jpeg', 'KTP'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('menerima file JPEG yang valid (magic bytes FF D8 FF)', async () => {
+      // Real JPEG header
+      const jpegBuffer = Buffer.from([
+        0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01,
+        ...new Array(50).fill(0x00),
+      ]);
+      httpService.post.mockReturnValue(
+        of({
+          data: {
+            responses: [{ fullTextAnnotation: { text: 'NIK : 3578012345670001\nNama : Budi' } }],
+          },
+        }),
+      );
+      // Tidak boleh throw — proses dilanjutkan ke Google Vision
+      await expect(
+        service.extractIdentity(jpegBuffer, 'ktp.jpg', 'image/jpeg', 'KTP'),
+      ).resolves.toBeDefined();
+    });
+
+    it('menerima file PNG yang valid (magic bytes 89 50 4E 47)', async () => {
+      const pngBuffer = Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+        ...new Array(50).fill(0x00),
+      ]);
+      httpService.post.mockReturnValue(
+        of({
+          data: {
+            responses: [{ fullTextAnnotation: { text: 'NIK : 3578012345670001\nNama : Budi' } }],
+          },
+        }),
+      );
+      await expect(
+        service.extractIdentity(pngBuffer, 'ktp.png', 'image/png', 'KTP'),
+      ).resolves.toBeDefined();
+    });
+
+    it('menerima file WebP yang valid (magic bytes RIFF....WEBP)', async () => {
+      const webpBuffer = Buffer.from([
+        0x52, 0x49, 0x46, 0x46, // RIFF
+        0x00, 0x00, 0x00, 0x00, // file size (dummy)
+        0x57, 0x45, 0x42, 0x50, // WEBP
+        ...new Array(50).fill(0x00),
+      ]);
+      httpService.post.mockReturnValue(
+        of({
+          data: {
+            responses: [{ fullTextAnnotation: { text: 'NIK : 3578012345670001\nNama : Budi' } }],
+          },
+        }),
+      );
+      await expect(
+        service.extractIdentity(webpBuffer, 'ktp.webp', 'image/webp', 'KTP'),
+      ).resolves.toBeDefined();
     });
   });
 });

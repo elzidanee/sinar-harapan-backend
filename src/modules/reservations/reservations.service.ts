@@ -142,7 +142,8 @@ export class ReservationsService {
             roomNumber,
             invoiceNumber,
             guestName: guest.fullName,
-            idNumber: guest.idNumber,
+            // security.md §7.2: TIDAK BOLEH menyertakan idNumber/data dokumen di audit log.
+            // Gunakan resourceId untuk lookup data tamu jika diperlukan.
           },
           ipAddress: ip || null,
         },

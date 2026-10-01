@@ -58,6 +58,15 @@ export class OcrService {
       );
     }
 
+    // security.md §10: Validasi tipe MIME ASLI via magic bytes (bukan hanya header dari client)
+    // Mencegah attacker upload file berbahaya (.exe, .php) dengan Content-Type dipalsukan
+    if (!this.validateMagicBytes(imageBuffer)) {
+      throw new BadRequestException(
+        'File yang diunggah bukan gambar yang valid (validasi signature file gagal)',
+      );
+    }
+
+
     // 1. Simpan gambar ke storage bucket privat (folder temp/) dan buat Signed URL 15 menit
     const ext = mimeType.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg';
     const tempPath = `temp/${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${ext}`;
@@ -313,5 +322,49 @@ export class OcrService {
       confidence,
       perluVerifikasiManual: confidence < 0.7,
     };
+  }
+
+  /**
+   * security.md §10 — Validasi magic bytes (file signature) untuk mencegah file type spoofing.
+   * Memeriksa header byte sesungguhnya, bukan header MIME dari client yang bisa dipalsukan.
+   *
+   * Signatures:
+   *   JPEG:  FF D8 FF
+   *   PNG:   89 50 4E 47 (‰PNG)
+   *   WebP:  52 49 46 46 ... 57 45 42 50 (RIFF....WEBP)
+   */
+  private validateMagicBytes(buffer: Buffer): boolean {
+    if (!buffer || buffer.length < 12) return false;
+
+    // JPEG: starts with FF D8 FF
+    if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+      return true;
+    }
+
+    // PNG: starts with 89 50 4E 47 0D 0A 1A 0A
+    if (
+      buffer[0] === 0x89 &&
+      buffer[1] === 0x50 &&
+      buffer[2] === 0x4e &&
+      buffer[3] === 0x47
+    ) {
+      return true;
+    }
+
+    // WebP: RIFF????WEBP (bytes 0-3 = "RIFF", bytes 8-11 = "WEBP")
+    if (
+      buffer[0] === 0x52 && // R
+      buffer[1] === 0x49 && // I
+      buffer[2] === 0x46 && // F
+      buffer[3] === 0x46 && // F
+      buffer[8] === 0x57 && // W
+      buffer[9] === 0x45 && // E
+      buffer[10] === 0x42 && // B
+      buffer[11] === 0x50 // P
+    ) {
+      return true;
+    }
+
+    return false;
   }
 }
