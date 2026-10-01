@@ -8,6 +8,19 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service.js';
 import { QueryReportTransactionsDto } from './dto/query-report-transactions.dto.js';
 import { ReportDateRangeDto } from './dto/report-date-range.dto.js';
 
+/**
+ * security.md §10.1 — Excel Formula Injection Prevention
+ * Field teks dari input user (nama tamu, alamat, nomor identitas, dll.) yang diawali karakter
+ * =, +, -, @, |, % berpotensi dieksekusi sebagai formula berbahaya saat dibuka di Excel/LibreOffice.
+ * Solusi: prefix dengan TAB character (\t) agar Excel memperlakukan sebagai string literal.
+ */
+export function excelSanitize(value: string | null | undefined): string {
+  if (!value) return '';
+  const dangerous = ['=', '+', '-', '@', '|', '%'];
+  return dangerous.includes(value.charAt(0)) ? `\t${value}` : value;
+}
+
+
 export interface ReportSummaryResult {
   totalCheckIn: number;
   totalCheckOut: number;
@@ -484,25 +497,27 @@ export class ReportsService {
     transactions.forEach((tx, idx) => {
       const row = sheetData.addRow({
         no: idx + 1,
-        invoiceNumber: tx.invoiceNumber,
+        // security.md §10.1: excelSanitize() pada semua field teks dari input user
+        invoiceNumber: excelSanitize(tx.invoiceNumber),
         checkIn: new Date(tx.checkInTime).toISOString().replace('T', ' ').substring(0, 16),
         checkOut: tx.actualCheckOutTime
           ? new Date(tx.actualCheckOutTime).toISOString().replace('T', ' ').substring(0, 16)
           : new Date(tx.expectedCheckOutTime).toISOString().replace('T', ' ').substring(0, 16),
-        roomNumber: tx.room.roomNumber,
-        roomType: tx.room.roomType,
-        idType: tx.guest.idType,
-        idNumber: tx.guest.idNumber,
-        guestName: tx.guest.fullName,
-        phone: tx.guest.phoneWhatsapp,
-        source: tx.bookingSource,
-        method: tx.paymentMethod,
+        roomNumber: excelSanitize(tx.room.roomNumber),
+        roomType: excelSanitize(tx.room.roomType),
+        idType: excelSanitize(tx.guest.idType),
+        idNumber: excelSanitize(tx.guest.idNumber),
+        guestName: excelSanitize(tx.guest.fullName),
+        phone: excelSanitize(tx.guest.phoneWhatsapp),
+        source: excelSanitize(tx.bookingSource),
+        method: excelSanitize(tx.paymentMethod),
         total: Number(tx.totalAmount),
-        operator: tx.receptionist?.fullName || 'Sistem',
+        operator: excelSanitize(tx.receptionist?.fullName || 'Sistem'),
       });
 
       row.getCell('total').numFmt = '"Rp" #,##0';
     });
+
 
     // Catat ke activity_logs (FR-REP-05)
     await this.auditLogsService.log({

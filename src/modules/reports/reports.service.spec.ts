@@ -208,3 +208,43 @@ describe('ReportsService', () => {
     });
   });
 });
+
+// ============================================================
+// security.md §10.1 — excelSanitize unit tests (standalone)
+// ============================================================
+import { excelSanitize } from './reports.service.js';
+
+describe('excelSanitize (security.md §10.1 — Formula Injection Prevention)', () => {
+  it.each([
+    ['=SUM(A1:A10)', '='],
+    ['+CMD|/C calc', '+'],
+    ['-2+3+cmd', '-'],
+    ['@SUM(1+1)', '@'],
+    ['|ping 8.8.8.8', '|'],
+    ['%0Aroot', '%'],
+  ])('menyisipkan TAB sebelum string yang diawali "%s"', (input, _prefix) => {
+    const result = excelSanitize(input);
+    expect(result).toBe(`\t${input}`);
+    expect(result.startsWith('\t')).toBe(true);
+  });
+
+  it('tidak mengubah nama tamu normal', () => {
+    expect(excelSanitize('Budi Santoso')).toBe('Budi Santoso');
+  });
+
+  it('tidak mengubah nomor kamar normal', () => {
+    expect(excelSanitize('101')).toBe('101');
+  });
+
+  it('mengembalikan string kosong untuk null', () => {
+    expect(excelSanitize(null)).toBe('');
+  });
+
+  it('mengembalikan string kosong untuk undefined', () => {
+    expect(excelSanitize(undefined)).toBe('');
+  });
+
+  it('mengembalikan string kosong untuk string kosong', () => {
+    expect(excelSanitize('')).toBe('');
+  });
+});

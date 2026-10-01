@@ -4,12 +4,14 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MinLength,
   validateSync,
 } from 'class-validator';
 
 class EnvironmentVariables {
   @IsString() DATABASE_URL: string;
-  @IsString() JWT_SECRET: string;
+  // security.md §4.1: JWT_SECRET minimum 32 karakter random, beda antara dev/staging/production
+  @IsString() @MinLength(32) JWT_SECRET: string;
 
   @IsOptional() @IsString() JWT_EXPIRES_IN?: string = '12h';
   @IsOptional() @IsNumber() BCRYPT_SALT_ROUNDS?: number = 10;

@@ -23,7 +23,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
         : (resp?.message ?? 'Terjadi kesalahan pada server');
 
     if (status === HttpStatus.INTERNAL_SERVER_ERROR) {
-      console.error('[UNHANDLED_ERROR]', exception);
+      // security.md §8: TIDAK PERNAH log exception mentah yang bisa mengandung PII (request body, dll.)
+      // Hanya log pesan error dan stack trace saja.
+      const errMessage = exception instanceof Error ? exception.message : String(exception);
+      const errStack = exception instanceof Error ? exception.stack : undefined;
+      console.error('[UNHANDLED_ERROR]', errMessage, errStack);
     }
 
     response.status(status).json({
