@@ -100,4 +100,15 @@ export class ReservationsController {
   getInvoice(@Param('id') id: string) {
     return this.reservationsService.getInvoiceUrl(id);
   }
+
+  @ApiOperation({
+    summary: 'Ambil signed URL 15 menit foto dokumen identitas (KTP/Paspor/SIM)',
+  })
+  @ApiResponse({ status: 200, description: 'Signed URL foto berhasil diterbitkan' })
+  @ApiResponse({ status: 404, description: 'Reservasi atau foto tidak ditemukan' })
+  @Roles('RECEPTIONIST', 'MANAGER')
+  @Get(':id/identity-photo')
+  getIdentityPhoto(@Param('id') id: string) {
+    return this.reservationsService.getIdentityPhotoUrl(id);
+  }
 }

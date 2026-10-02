@@ -13,8 +13,13 @@ async function bootstrap() {
   app.setGlobalPrefix('api', { exclude: ['health'] });
 
   app.use(helmet());
+  // security.md §9: CORS dibatasi ke origin resmi — tanpa wildcard di production.
+  const corsOrigins = process.env.CORS_ORIGIN?.split(',').map((o) => o.trim()).filter(Boolean);
+  if (process.env.NODE_ENV === 'production' && (!corsOrigins || corsOrigins.length === 0)) {
+    throw new Error('CORS_ORIGIN wajib di-set di production (tanpa wildcard *)');
+  }
   app.enableCors({
-    origin: process.env.CORS_ORIGIN?.split(',') ?? '*',
+    origin: corsOrigins && corsOrigins.length > 0 ? corsOrigins : false,
   });
 
   app.useGlobalPipes(

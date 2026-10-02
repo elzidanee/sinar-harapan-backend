@@ -12,6 +12,14 @@ describe('RolesGuard', () => {
     guard = new RolesGuard(reflector);
   });
 
+  // Reflector.getAllAndOverride dipanggil 2x per canActivate (IS_PUBLIC_KEY, lalu ROLES_KEY).
+  // Default: bukan public → kembalikan null untuk panggilan pertama, lalu nilai mock.
+  const mockRolesGuard = (roles: string[] | null) =>
+    vi
+      .spyOn(reflector, 'getAllAndOverride')
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce(roles);
+
   const createMockContext = (user?: { role?: string }): ExecutionContext =>
     ({
       getHandler: vi.fn(),
@@ -22,25 +30,31 @@ describe('RolesGuard', () => {
     }) as unknown as ExecutionContext;
 
   it('mengizinkan akses jika tidak ada metadata @Roles()', () => {
-    vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue(null);
+    mockRolesGuard(null);
     const context = createMockContext({ role: 'RECEPTIONIST' });
     expect(guard.canActivate(context)).toBe(true);
   });
 
   it('mengizinkan akses jika role user cocok dengan salah satu role yang diizinkan', () => {
-    vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue(['MANAGER']);
+    mockRolesGuard(['MANAGER']);
     const context = createMockContext({ role: 'MANAGER' });
     expect(guard.canActivate(context)).toBe(true);
   });
 
+  it('mengizinkan akses @Public() tanpa cek role', () => {
+    vi.spyOn(reflector, 'getAllAndOverride').mockReturnValueOnce(true);
+    const context = createMockContext(undefined);
+    expect(guard.canActivate(context)).toBe(true);
+  });
+
   it('menolak akses (ForbiddenException) jika role user tidak cocok', () => {
-    vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue(['MANAGER']);
+    mockRolesGuard(['MANAGER']);
     const context = createMockContext({ role: 'RECEPTIONIST' });
     expect(() => guard.canActivate(context)).toThrow(ForbiddenException);
   });
 
   it('menolak akses (ForbiddenException) jika user tidak ada', () => {
-    vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue(['MANAGER']);
+    mockRolesGuard(['MANAGER']);
     const context = createMockContext(undefined);
     expect(() => guard.canActivate(context)).toThrow(ForbiddenException);
   });

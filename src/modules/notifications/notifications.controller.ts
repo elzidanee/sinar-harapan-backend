@@ -20,6 +20,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { Request } from 'express';
+import { Public } from '../../common/decorators/public.decorator.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
@@ -101,6 +102,7 @@ export class NotificationsController {
     summary: 'Callback Webhook dari WhatsApp Gateway Provider (Tanpa JWT Guard)',
   })
   @ApiResponse({ status: 200, description: 'Webhook berhasil diproses' })
+  @Public()
   @Post('webhook')
   @HttpCode(HttpStatus.OK)
   handleWebhook(

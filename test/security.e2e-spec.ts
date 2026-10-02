@@ -31,7 +31,12 @@ describe('Security Hardening & QA (Tahap 8)', () => {
   let managerToken: string;
 
   const TEST_PASSWORD = 'SecurityTest123!';
-  const WA_WEBHOOK_SECRET = process.env.WA_WEBHOOK_SECRET ?? 'test-webhook-secret-32chars-long!!';
+  // security.md §11.2 fail-closed: secret placeholder "xxxx" menolak SEMUA webhook,
+  // jadi paksa secret uji yang valid sebelum AppModule di-init (ConfigModule baca process.env saat init)
+  if (!process.env.WA_WEBHOOK_SECRET || process.env.WA_WEBHOOK_SECRET === 'xxxx') {
+    process.env.WA_WEBHOOK_SECRET = 'test-webhook-secret-32chars-long!!';
+  }
+  const WA_WEBHOOK_SECRET = process.env.WA_WEBHOOK_SECRET;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -138,6 +143,53 @@ describe('Security Hardening & QA (Tahap 8)', () => {
   // §5.3 — RBAC Matrix
   // =========================================================================
   describe('§5.3 — RBAC Matrix: MANAGER-only endpoints', () => {
+    it('PATCH /api/rooms/:id (update): RECEPTIONIST → 403', async () => {
+      const res = await request(app.getHttpServer())
+        .patch('/api/rooms/nonexistent-id')
+        .set('Authorization', `Bearer ${receptionistToken}`)
+        .send({ basePricePerNight: 999999 })
+        .expect(403);
+      expect(res.body.error.code).toBe('FORBIDDEN');
+    });
+
+    it('PATCH /api/rooms/:id/mark-clean: RECEPTIONIST → 200 (boleh akses)', async () => {
+      // mark-clean boleh untuk RECEPTIONIST — pastikan bukan 403 (404/400 = lolos guard)
+      const res = await request(app.getHttpServer())
+        .patch('/api/rooms/nonexistent-id/mark-clean')
+        .set('Authorization', `Bearer ${receptionistToken}`);
+      expect([400, 404]).toContain(res.status);
+    });
+
+    it('GET /api/reservations: RECEPTIONIST → 200 (boleh akses)', async () => {
+      await request(app.getHttpServer())
+        .get('/api/reservations')
+        .set('Authorization', `Bearer ${receptionistToken}`)
+        .expect(200);
+    });
+
+    it('GET /api/reservations/:id/identity-photo: RECEPTIONIST → lolos guard (200/404, bukan 403)', async () => {
+      // security.md §6.2: foto identitas hanya via signed URL 15 menit (bukan path permanen)
+      const res = await request(app.getHttpServer())
+        .get('/api/reservations/nonexistent-id/identity-photo')
+        .set('Authorization', `Bearer ${receptionistToken}`);
+      expect([404]).toContain(res.status);
+    });
+
+    it('POST /api/ocr/extract-identity tanpa file: RECEPTIONIST → lolos guard (400, bukan 403)', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/ocr/extract-identity')
+        .set('Authorization', `Bearer ${receptionistToken}`)
+        .field('documentType', 'KTP');
+      expect(res.status).toBe(400);
+    });
+
+    it('GET /api/notifications/wa-link/:id: RECEPTIONIST → lolos guard (404, bukan 403)', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/notifications/wa-link/nonexistent-id')
+        .set('Authorization', `Bearer ${receptionistToken}`);
+      expect(res.status).toBe(404);
+    });
+
     it('GET /api/reports/summary: RECEPTIONIST → 403', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/reports/summary')

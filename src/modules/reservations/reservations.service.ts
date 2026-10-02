@@ -312,7 +312,54 @@ export class ReservationsService {
       throw new NotFoundException('Reservasi tidak ditemukan');
     }
 
-    return reservation;
+    // security.md §6.2: TIDAK PERNAH mengembalikan path/URL permanen foto dokumen identitas.
+    // Frontend meminta signed URL 15 menit via GET /reservations/:id/identity-photo bila perlu.
+    const { idImageUrl: _idImageUrl, ...guestWithoutImage } =
+      (reservation.guest ?? {}) as Partial<typeof reservation.guest>;
+
+    return {
+      ...reservation,
+      guest: guestWithoutImage,
+    };
+  }
+
+  // security.md §6.2: akses foto dokumen identitas (KTP/Paspor/SIM) HANYA via
+  // signed URL 15 menit yang diterbitkan backend setelah validasi JWT + role.
+  async getIdentityPhotoUrl(reservationId: string) {
+    const reservation = await this.prisma.reservation.findUnique({
+      where: { id: reservationId },
+      include: {
+        guest: { select: { idImageUrl: true } },
+      },
+    });
+
+    if (!reservation) {
+      throw new NotFoundException('Reservasi tidak ditemukan');
+    }
+
+    if (!reservation.guest.idImageUrl) {
+      throw new NotFoundException('Foto dokumen identitas tidak tersedia');
+    }
+
+    // Nilai tersimpan bisa berupa path storage ("guests/xxx.jpg") atau URL lama —
+    // ambil segmen path terakhir agar tidak bocor base URL permanen.
+    const stored = reservation.guest.idImageUrl;
+    let filePath = stored;
+    try {
+      if (/^https?:\/\//i.test(stored)) {
+        const url = new URL(stored);
+        filePath = url.pathname.replace(/^\/+/, '');
+      }
+    } catch {
+      filePath = stored;
+    }
+    filePath = filePath.replace(/^\/+/, '');
+
+    return {
+      // storageService.createSignedUrl default 15 menit (900s) sesuai §6.2
+      photoUrl: await this.storageService.createSignedUrl(filePath),
+      expiresInSeconds: 900,
+    };
   }
 
   async processCheckout(

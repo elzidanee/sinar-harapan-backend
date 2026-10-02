@@ -374,7 +374,7 @@ describe('WhatsappService', () => {
   });
 
   describe('verifyWebhookSignature', () => {
-    it('mengembalikan true jika webhook secret belum disetel (mode dev)', () => {
+    it('mengembalikan false (fail-closed) jika webhook secret belum disetel', () => {
       const devConfig = {
         get: vi.fn(() => undefined),
       };
@@ -385,7 +385,25 @@ describe('WhatsappService', () => {
         storageService as any,
       );
 
-      expect(devService.verifyWebhookSignature(Buffer.from('body'), 'any')).toBe(true);
+      expect(devService.verifyWebhookSignature(Buffer.from('body'), 'any')).toBe(false);
+    });
+
+    it('mengembalikan false (fail-closed) jika secret placeholder "xxxx"', () => {
+      const placeholderConfig = {
+        get: vi.fn((key: string) => {
+          if (key === 'WA_WEBHOOK_SECRET') return 'xxxx';
+          return undefined;
+        }),
+      };
+      const placeholderService = new WhatsappService(
+        prisma as any,
+        httpService as any,
+        placeholderConfig as any,
+        storageService as any,
+      );
+
+      const rawBody = Buffer.from('{"status":"read"}');
+      expect(placeholderService.verifyWebhookSignature(rawBody, 'sha256=abc')).toBe(false);
     });
 
     it('mengembalikan true jika signature HMAC cocok', () => {
@@ -399,9 +417,25 @@ describe('WhatsappService', () => {
       expect(service.verifyWebhookSignature(rawBody, expectedSig)).toBe(true);
     });
 
+    it('mengembalikan true jika signature memakai prefix "sha256="', () => {
+      const rawBody = Buffer.from('{"status":"read"}');
+      const secret = 'test-secret';
+      const expectedSig = crypto
+        .createHmac('sha256', secret)
+        .update(rawBody)
+        .digest('hex');
+
+      expect(service.verifyWebhookSignature(rawBody, `sha256=${expectedSig}`)).toBe(true);
+    });
+
     it('mengembalikan false jika signature salah', () => {
       const rawBody = Buffer.from('{"status":"read"}');
       expect(service.verifyWebhookSignature(rawBody, 'invalid-signature')).toBe(false);
+    });
+
+    it('mengembalikan false jika signature hex panjangnya beda (bukan timing leak)', () => {
+      const rawBody = Buffer.from('{"status":"read"}');
+      expect(service.verifyWebhookSignature(rawBody, 'abcd')).toBe(false);
     });
   });
 });

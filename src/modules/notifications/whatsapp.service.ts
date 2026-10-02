@@ -253,8 +253,9 @@ export class WhatsappService {
 
     // Jika API Token belum dikonfigurasi, gunakan mode Mock Simulator (100% Gratis)
     if (!this.apiToken || this.apiToken === 'xxxx') {
+      // security.md §8: TIDAK log targetPhone/isi pesan (PII tamu) — cukup reservationId.
       this.logger.log(
-        `[MOCK WA GATEWAY] Mengirim pesan pengingat ke ${targetPhone}:\n${message}`,
+        `[MOCK WA GATEWAY] Mengirim pesan pengingat untuk reservasi ${reservationId}`,
       );
       const mockMessageId = `mock-wa-${Date.now()}`;
       await this.markReminderSent(reservationId, WaDeliveryStatus.SENT);
@@ -295,14 +296,35 @@ export class WhatsappService {
         targetPhone,
       };
     } catch (error) {
+      // security.md §8: TIDAK log targetPhone (PII) — cukup reservationId.
       this.logger.error(
-        `Gagal mengirim WhatsApp ke ${targetPhone} via gateway:`,
+        `Gagal mengirim WhatsApp untuk reservasi ${reservationId} via gateway:`,
         error,
       );
       await this.prisma.reservation.update({
         where: { id: reservationId },
         data: { waDeliveryStatus: WaDeliveryStatus.FAILED },
       });
+      // business-flow.md §5: kegagalan pengiriman tercatat sebagai WA_REMINDER_FAILED
+      try {
+        await this.prisma.activityLog.create({
+          data: {
+            actionType: 'WA_REMINDER_FAILED',
+            resourceType: 'reservation',
+            resourceId: reservationId,
+            details: {
+              invoiceNumber: reservation.invoiceNumber,
+              roomNumber: reservation.room.roomNumber,
+              reason: error instanceof Error ? error.message : 'gateway_error',
+            },
+          },
+        });
+      } catch (logError) {
+        this.logger.error(
+          `[WA_REMINDER_FAILED_LOG_ERROR] reservasi ${reservationId}:`,
+          logError,
+        );
+      }
       throw error;
     }
   }
@@ -323,9 +345,8 @@ export class WhatsappService {
 
     const msgId = payload.messageId ?? payload.id ?? 'unknown';
 
-    this.logger.log(
-      `Webhook WhatsApp diterima: MessageId: ${msgId}, Status: ${targetStatus}`,
-    );
+    // security.md §8: TIDAK log konten pesan/muatan webhook (potensi PII tamu).
+    this.logger.log(`Webhook WhatsApp diterima: Status: ${targetStatus}`);
 
     return {
       success: true,
@@ -335,11 +356,13 @@ export class WhatsappService {
   }
 
   /**
-   * Verifikasi signature HMAC webhook dari provider untuk mencegah spoofing
+   * Verifikasi signature HMAC webhook dari provider untuk mencegah spoofing.
+   * security.md §11.2: fail-closed — tanpa secret yang valid, semua webhook ditolak.
+   * Format header: "sha256=<hex>" (prefix opsional, hex dibanding sebagai bytes).
    */
   verifyWebhookSignature(rawBody?: Buffer, signature?: string): boolean {
     if (!this.webhookSecret || this.webhookSecret === 'xxxx') {
-      return true; // Mode development: bypass jika belum disetel
+      return false;
     }
 
     if (!rawBody || !signature) {
@@ -351,10 +374,21 @@ export class WhatsappService {
       .update(rawBody)
       .digest('hex');
 
-    const sigBuffer = Buffer.from(signature);
-    const expectedBuffer = Buffer.from(expectedSignature);
+    let sigHex = signature.trim();
+    if (sigHex.startsWith('sha256=')) {
+      sigHex = sigHex.slice('sha256='.length);
+    }
 
-    if (sigBuffer.length !== expectedBuffer.length) {
+    let sigBuffer: Buffer;
+    let expectedBuffer: Buffer;
+    try {
+      sigBuffer = Buffer.from(sigHex, 'hex');
+      expectedBuffer = Buffer.from(expectedSignature, 'hex');
+    } catch {
+      return false;
+    }
+
+    if (sigBuffer.length !== expectedBuffer.length || sigBuffer.length === 0) {
       return false;
     }
 

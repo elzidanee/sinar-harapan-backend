@@ -37,7 +37,8 @@ class EnvironmentVariables {
   @IsOptional() @IsNumber() LOGIN_RATE_LIMIT_MAX?: number = 5;
   @IsOptional() @IsNumber() LOGIN_RATE_LIMIT_WINDOW_MS?: number = 60000;
 
-  @IsOptional() SWAGGER_ENABLED?: boolean = true;
+  // security.md §13: Swagger default nonaktif (false) agar tidak terbuka di production
+  @IsOptional() SWAGGER_ENABLED?: boolean = false;
   @IsOptional() @IsString() SWAGGER_PATH?: string = 'api-docs';
 
   @IsOptional() @IsString() CORS_ORIGIN?: string;
