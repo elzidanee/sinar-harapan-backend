@@ -40,7 +40,9 @@ async function bootstrap() {
       .addBearerAuth()
       .build();
     const document = SwaggerModule.createDocument(app, config);
-    SwaggerModule.setup(process.env.SWAGGER_PATH ?? 'api-docs', app, document);
+    const swaggerPath = process.env.SWAGGER_PATH ?? 'api-docs';
+    SwaggerModule.setup(swaggerPath, app, document);
+    console.log(`Swagger docs jalan di http://localhost:${process.env.PORT ?? 3000}/${swaggerPath}`);
   }
 
   await app.listen(process.env.PORT ?? 3000);
